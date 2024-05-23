@@ -15,13 +15,14 @@ typedef struct {
     int page_offset;
     int tlb_index;
     int frame_number;
-    int value;
+    int value; // value from backstore
     int valid; // if 1 is allocated, if 0 NOT
 } Memory;
 
 typedef struct {
     int page_number;
-    int free;
+    int frame_number;
+    int free; 
 } Tlb;
 
 typedef struct {
@@ -30,34 +31,39 @@ typedef struct {
     char value;
 } Physical_memory;
 
+int binaryToDecimal(const char *binary); // binary/decimal conversion
+char* decimalToBinary(int decimal);
+int offsetToDecimal(const char *binary);
+int pageToDecimal(const char *binary);
+
+Memory* readFromFile(char *filename, int *number); // read files
+char readBackingStore(int page_number, int offset);
+
+void init_physical_memory(); // physical memory manipulation
+void fifo_physical_memory(Memory *memory);
+void lru_physical_memory(Memory *memory);
+int find_free_frame();
+
+void init_page_table(); // page table manipulation
+void verify_page_table(Memory *memory);
+void fifo_page_table(Memory *memory);
+void lru_page_table(Memory *memory);
+int find_free_page();
+void handle_page_fault(Memory *memory);
+
+void init_tlb(); // tlb manipulation
+void verify_tlb(Memory *memory);
+void handle_tlb(Memory *memory);
+int find_free_tlb();
+
 Tlb tlb[TLB_SIZE];
 Memory page_table[NUMBER_OF_FRAMES];
 Physical_memory physical_memory[NUMBER_OF_FRAMES];
 int hit = 0;
 int fault = 0;
-
-int binaryToDecimal(const char *binary);
-char* decimalToBinary(int decimal);
-int offsetToDecimal(const char *binary);
-int pageToDecimal(const char *binary);
-
-Memory* readFromFile(char *filename, int *number);
-char readBackingStore(int page_number, int offset);
-
-void init_physical_memory();
-void init_page_table();
-void init_tlb();
-void verify_tlb(int page_number);
-void verify_page_table(int page_number);
-void fifo_physical_memory(int page_number);
-void fifo_page_table(int page_number);
-void lru_physical_memory(int page_number);
-void lru_page_table(int page_number);
-void handle_page_fault(int page_number);
-void handle_tlb(int page_number);
-int find_free_frame();
-int find_free_page();
-int find_free_tlb();
+int tlb_fifo_index = 0; 
+int physical_index = 0;
+char algorithm;
 
 int main(int argc, char *argv[]) {
     int addresses;
@@ -66,25 +72,36 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    if (strcmp(argv[2], "fifo") == 0) {
+        algorithm = 'F';
+    }
+    else if (strcmp(argv[2], "lru") == 0) {
+        algorithm = 'L';
+    }
+
+    printf("Algoritmo selecionado: %c\n", algorithm);
+
     init_physical_memory();
     init_page_table();
     init_tlb();
 
     for (int i = 0; i < addresses; i++) {
-        verify_tlb(memory[i].page_number);
+        verify_tlb(&memory[i]);
     }
 
     // output
+    FILE *output = fopen("correct.txt", "w");
     for (int i = 0; i < addresses; i++) {
-        //int physical = memory[i].page_offset + (memory[i].tlb_index * FRAME_SIZE);
-        //printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, memory[i].tlb_index, physical, memory[i].value);
+        int physical = memory[i].page_offset + (memory[i].frame_number * FRAME_SIZE);
+        fprintf(output, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, memory[i].tlb_index, physical, memory[i].value);
     }
-    printf("Number of Translated Addresses = %d\n", addresses);
-    printf("Page Faults = %d\n", fault);
-    printf("Page Fault Rate = %.3f\n", (float) fault / addresses);
-    printf("TLB Hits = %d\n", hit);
-    printf("TLB Hit Rate = %.3f\n", (float) hit / addresses);
+    fprintf(output, "Number of Translated Addresses = %d\n", addresses);
+    fprintf(output, "Page Faults = %d\n", fault);
+    fprintf(output, "Page Fault Rate = %.3f\n", (float) fault / addresses);
+    fprintf(output, "TLB Hits = %d\n", hit);
+    fprintf(output, "TLB Hit Rate = %.3f\n", (float) hit / addresses);
 
+    fclose(output);
     free(memory);
 
     return 0;
@@ -201,14 +218,12 @@ Memory* readFromFile(char *filename, int *number) {
         }
 
         memory[*number].address = address;
-
         char *binary_address = decimalToBinary(address);
         memory[*number].page_offset = offsetToDecimal(binary_address);
         memory[*number].page_number = pageToDecimal(binary_address);
         memory[*number].value = readBackingStore(memory[*number].page_number, memory[*number].page_offset);
 
         free(binary_address);
-
         (*number)++;
     }
 
@@ -236,7 +251,6 @@ char readBackingStore(int page_number, int offset) {
     }
 
     fclose(file);
-
     return value;
 }
 
@@ -258,104 +272,116 @@ void init_tlb() {
     }
 }
 
-void verify_tlb(int page_number) {
+void verify_tlb(Memory *memory) {
+    int page_number = memory->page_number;
     int found = 0;
-    for (int i = 0; i < TLB_SIZE; i++) {
+    for (int i = 0; i < TLB_SIZE; i++) { // checks if its in tlb
         if (page_number == tlb[i].page_number) {
             hit++;
+            memory->tlb_index = i;
+            memory->frame_number = tlb[i].frame_number;
             found = 1;
             break;
         }
     }
 
-    if (found == 0) { // if not found on tlb, seach on page table
-        verify_page_table(page_number);
+    if (!found) { // if not found in tlb, search in page table
+        verify_page_table(memory);
     } 
 }
 
-void verify_page_table(int page_number) {
+void verify_page_table(Memory *memory) {
+    int page_number = memory->page_number;
     int found = 0;
     for (int i = 0; i < NUMBER_OF_PAGES; i++) {
         if (page_table[i].valid == 1 && page_number == page_table[i].page_number) { // finds address on table
             found = 1;
+            memory->frame_number = page_table[i].frame_number;
             break;
         }
     }
 
-    if (found == 1) {
-        handle_tlb(page_number);
+    if (found) {
+        handle_tlb(memory);
         return;
     } else { 
-        handle_page_fault(page_number);
+        handle_page_fault(memory);
     }
-    
 }
-void fifo_physical_memory(int page_number) {
-    for (int i = 0; i < NUMBER_OF_FRAMES - 1; i++) {
-        physical_memory[i] = physical_memory[i + 1];
-    }
+void fifo_physical_memory(Memory *memory) {
+    physical_memory[physical_index].page_number = memory->page_number;
+    physical_memory[physical_index].free = 0;
+    memory->frame_number = physical_index;
 
-    physical_memory[NUMBER_OF_FRAMES - 1].page_number = page_number;
-    physical_memory[NUMBER_OF_FRAMES - 1].free = 0;  
+    physical_index = (physical_index + 1) % NUMBER_OF_FRAMES;
 }
 
-void fifo_page_table(int page_number) {
+void fifo_page_table(Memory *memory) {
     for (int i = 0; i < NUMBER_OF_PAGES - 1; i++) {
         page_table[i] = page_table[i + 1];
     }
 
-    page_table[NUMBER_OF_PAGES - 1].page_number = page_number;
-    page_table[NUMBER_OF_PAGES - 1].frame_number = NUMBER_OF_FRAMES - 1;
+    page_table[NUMBER_OF_PAGES - 1].page_number = memory->page_number;
+    page_table[NUMBER_OF_PAGES - 1].frame_number = memory->frame_number;
     page_table[NUMBER_OF_PAGES - 1].valid = 1;
 }
 
-void fifo_tlb(int page_number) {
-    for (int i = 0; i < TLB_SIZE; i++) {
-        tlb[i] = tlb[i + 1];
-    }
+void fifo_tlb(Memory *memory) {
+    tlb[tlb_fifo_index].page_number = memory->page_number;
+    tlb[tlb_fifo_index].frame_number = memory->frame_number;
+    tlb[tlb_fifo_index].free = 0;
+    memory->tlb_index = tlb_fifo_index;
 
-    tlb[TLB_SIZE - 1].free = 0;
-    tlb[TLB_SIZE - 1].page_number = page_number;
+    tlb_fifo_index = (tlb_fifo_index + 1) % TLB_SIZE;
 }
 
-void lru_physical_memory(int page_number) {
-
-}
-
-void lru_page_table(int page_number) {
+void lru_physical_memory(Memory *memory) {
 
 }
 
-void handle_page_fault(int page_number) {
+void lru_page_table(Memory *memory) {
+
+}
+
+void handle_page_fault(Memory *memory) { // update physical memory and page table
     fault++;
 
-    handle_tlb(page_number);
-
-    int index = find_free_frame();  
+    int index = find_free_frame();  // if free, allocate in free frame
     if (index != -1) {
-        physical_memory[index].page_number = page_number;
+        physical_memory[index].page_number = memory->page_number;
         physical_memory[index].free = 0;
+        memory->frame_number = index;
+
         int index_page = find_free_page();
         if (index != -1) {
             page_table[index_page].valid = 1;
-            page_table[index_page].page_number = page_number;
-            page_table[index_page].frame_number = index;
+            page_table[index_page].page_number = memory->page_number;
+            page_table[index_page].frame_number = memory->frame_number;
         }
     } 
-    else {
-        fifo_physical_memory(page_number);
-        fifo_page_table(page_number);
+    else { // if not free, use fifo or lru
+        if (algorithm == 'F') {
+            fifo_physical_memory(memory);
+            fifo_page_table(memory);
+        }
+        else if (algorithm == 'L') {
+            //lru_physical_memory(memory);
+           //lru_page_table(memory);
+        }
     }
+    handle_tlb(memory);
 }
 
-void handle_tlb(int page_number) {
+void handle_tlb(Memory *memory) { // update tlb values
     int index_tlb = find_free_tlb();
-    if (index_tlb != -1) { // if tlb is free, allocate on tlb
-        tlb[index_tlb].page_number = page_number;
+    if (index_tlb != -1) { // if tlb is free, allocate in tlb
+        memory->tlb_index = index_tlb;
+        tlb[index_tlb].page_number = memory->page_number;
+        tlb[index_tlb].frame_number = memory->frame_number;
         tlb[index_tlb].free = 0;
     }
-    else { // if not fifo on tlb
-        fifo_tlb(page_number);
+    else { // if not, fifo in tlb
+        fifo_tlb(memory);
     }
 }
 
