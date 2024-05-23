@@ -79,8 +79,6 @@ int main(int argc, char *argv[]) {
         algorithm = 'L';
     }
 
-    printf("Algoritmo selecionado: %c\n", algorithm);
-
     init_physical_memory();
     init_page_table();
     init_tlb();
