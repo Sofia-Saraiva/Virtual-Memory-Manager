@@ -23,7 +23,7 @@ The virtual memory manager simulates the translation of logical addresses to phy
 2. Navigate to the project directory:
 
     ```bash
-    cd Virtual-Memory-Manager/src
+    cd virtual-memory-manager/src
     ```
 
 3. Compile the code using Makefile:
