@@ -13,9 +13,16 @@ typedef struct {
     int address;
     int page_number;
     int page_offset;
+    int tlb_index;
+    int frame_number;
     int value;
-    int valid; // if 1 is valid, if 0 is NOT valid
+    int valid; // if 1 is allocated, if 0 NOT
 } Memory;
+
+typedef struct {
+    int page_number;
+    int free;
+} Tlb;
 
 typedef struct {
     int page_number;
@@ -23,7 +30,7 @@ typedef struct {
     char value;
 } Physical_memory;
 
-Memory tlb[TLB_SIZE];
+Tlb tlb[TLB_SIZE];
 Memory page_table[NUMBER_OF_FRAMES];
 Physical_memory physical_memory[NUMBER_OF_FRAMES];
 int hit = 0;
@@ -39,11 +46,18 @@ char readBackingStore(int page_number, int offset);
 
 void init_physical_memory();
 void init_page_table();
+void init_tlb();
+void verify_tlb(int page_number);
 void verify_page_table(int page_number);
 void fifo_physical_memory(int page_number);
 void fifo_page_table(int page_number);
+void lru_physical_memory(int page_number);
+void lru_page_table(int page_number);
 void handle_page_fault(int page_number);
+void handle_tlb(int page_number);
 int find_free_frame();
+int find_free_page();
+int find_free_tlb();
 
 int main(int argc, char *argv[]) {
     int addresses;
@@ -52,23 +66,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("starting!\n");
     init_physical_memory();
     init_page_table();
+    init_tlb();
 
     for (int i = 0; i < addresses; i++) {
-        verify_page_table(memory[i].page_number);
-        for (int j = 0; j < NUMBER_OF_FRAMES; j++) {
-            //printf("%d Página %d\n", j, page_table[j].page_number);
-            //printf("%d Frame %d\n", j, physical_memory[j].page_number);
-        }
-
-        //int tlb;
-        //int physical = memory[i].page_offset + (tlb * FRAME_SIZE);
-        //printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, tlb_number, physical, memory[i].value);
+        verify_tlb(memory[i].page_number);
     }
 
     // output
+    for (int i = 0; i < addresses; i++) {
+        //int physical = memory[i].page_offset + (memory[i].tlb_index * FRAME_SIZE);
+        //printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, memory[i].tlb_index, physical, memory[i].value);
+    }
     printf("Number of Translated Addresses = %d\n", addresses);
     printf("Page Faults = %d\n", fault);
     printf("Page Fault Rate = %.3f\n", (float) fault / addresses);
@@ -76,7 +86,7 @@ int main(int argc, char *argv[]) {
     printf("TLB Hit Rate = %.3f\n", (float) hit / addresses);
 
     free(memory);
-    printf("ending!\n");
+
     return 0;
 }
 
@@ -242,20 +252,40 @@ void init_page_table() {
     }
 }
 
+void init_tlb() {
+    for (int i = 0; i < TLB_SIZE; i++) {
+        tlb[i].free = 1;
+    }
+}
+
+void verify_tlb(int page_number) {
+    int found = 0;
+    for (int i = 0; i < TLB_SIZE; i++) {
+        if (page_number == tlb[i].page_number) {
+            hit++;
+            found = 1;
+            break;
+        }
+    }
+
+    if (found == 0) { // if not found on tlb, seach on page table
+        verify_page_table(page_number);
+    } 
+}
+
 void verify_page_table(int page_number) {
     int found = 0;
     for (int i = 0; i < NUMBER_OF_PAGES; i++) {
-        if (page_table[i].valid == 0 && page_number == page_table[i].page_number) { // finds address on table
-            hit++;
-            printf("Página %d já está alocada.\n", page_number);
+        if (page_table[i].valid == 1 && page_number == page_table[i].page_number) { // finds address on table
             found = 1;
             break;
         }
     }
 
     if (found == 1) {
+        handle_tlb(page_number);
         return;
-    } else {
+    } else { 
         handle_page_fault(page_number);
     }
     
@@ -275,20 +305,58 @@ void fifo_page_table(int page_number) {
     }
 
     page_table[NUMBER_OF_PAGES - 1].page_number = page_number;
+    page_table[NUMBER_OF_PAGES - 1].frame_number = NUMBER_OF_FRAMES - 1;
+    page_table[NUMBER_OF_PAGES - 1].valid = 1;
+}
+
+void fifo_tlb(int page_number) {
+    for (int i = 0; i < TLB_SIZE; i++) {
+        tlb[i] = tlb[i + 1];
+    }
+
+    tlb[TLB_SIZE - 1].free = 0;
+    tlb[TLB_SIZE - 1].page_number = page_number;
+}
+
+void lru_physical_memory(int page_number) {
+
+}
+
+void lru_page_table(int page_number) {
+
 }
 
 void handle_page_fault(int page_number) {
     fault++;
+
+    handle_tlb(page_number);
+
     int index = find_free_frame();  
     if (index != -1) {
         physical_memory[index].page_number = page_number;
         physical_memory[index].free = 0;
-        page_table[index].page_number = page_number;
-        page_table[index].valid = 0;
+        int index_page = find_free_page();
+        if (index != -1) {
+            page_table[index_page].valid = 1;
+            page_table[index_page].page_number = page_number;
+            page_table[index_page].frame_number = index;
+        }
+    } 
+    else {
+        fifo_physical_memory(page_number);
+        fifo_page_table(page_number);
     }
- 
-    fifo_physical_memory(page_number);
-    fifo_page_table(page_number);
+}
+
+void handle_tlb(int page_number) {
+    int index_tlb = find_free_tlb();
+    if (index_tlb != -1) { // if tlb is free, allocate on tlb
+        tlb[index_tlb].page_number = page_number;
+        tlb[index_tlb].free = 0;
+    }
+    else { // if not fifo on tlb
+        fifo_tlb(page_number);
+    }
 }
 
 int find_free_frame() {
@@ -298,4 +366,22 @@ int find_free_frame() {
         }
     }
     return -1; 
+}
+
+int find_free_page() {
+    for (int i = 0; i < NUMBER_OF_PAGES; i++) {
+        if (page_table[i].valid == 0) {
+            return i; 
+        }
+    }
+    return -1; 
+}
+
+int find_free_tlb() {
+    for (int i = 0; i < TLB_SIZE; i++) {
+        if (tlb[i].free == 1) {
+            return i;
+        }
+    }
+    return -1;
 }
