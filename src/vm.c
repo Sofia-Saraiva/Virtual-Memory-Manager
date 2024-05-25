@@ -15,6 +15,7 @@ typedef struct {
     int page_offset;
     int tlb_index;
     int frame_number;
+    int time;
     int value; // value from backstore
     int valid; // if 1 is allocated, if 0 NOT
 } Memory;
@@ -28,7 +29,7 @@ typedef struct {
 typedef struct {
     int page_number;
     int free; // if 1 is free, if 0 is NOT free
-    char value;
+    int time; // used to keep track of lru
 } Physical_memory;
 
 int binaryToDecimal(const char *binary); // binary/decimal conversion
@@ -43,6 +44,7 @@ void init_physical_memory(); // physical memory manipulation
 void fifo_physical_memory(Memory *memory);
 void lru_physical_memory(Memory *memory);
 int find_free_frame();
+int get_current_time();
 
 void init_page_table(); // page table manipulation
 void verify_page_table(Memory *memory);
@@ -50,6 +52,7 @@ void fifo_page_table(Memory *memory);
 void lru_page_table(Memory *memory);
 int find_free_page();
 void handle_page_fault(Memory *memory);
+void lru_page_table(Memory *memory);
 
 void init_tlb(); // tlb manipulation
 void verify_tlb(Memory *memory);
@@ -91,6 +94,7 @@ int main(int argc, char *argv[]) {
     FILE *output = fopen("correct.txt", "w");
     for (int i = 0; i < addresses; i++) {
         int physical = memory[i].page_offset + (memory[i].frame_number * FRAME_SIZE);
+        printf("FRAME NUMBER %d\n", memory[i].frame_number);
         fprintf(output, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, memory[i].tlb_index, physical, memory[i].value);
     }
     fprintf(output, "Number of Translated Addresses = %d\n", addresses);
@@ -255,6 +259,7 @@ char readBackingStore(int page_number, int offset) {
 void init_physical_memory() {
     for (int i = 0; i < NUMBER_OF_FRAMES; i++) { 
         physical_memory[i].free = 1;
+        physical_memory[i].time = -1;
     }
 }
 
@@ -278,6 +283,7 @@ void verify_tlb(Memory *memory) {
             hit++;
             memory->tlb_index = i;
             memory->frame_number = tlb[i].frame_number;
+            physical_memory[memory->frame_number].time = get_current_time();
             found = 1;
             break;
         }
@@ -295,6 +301,7 @@ void verify_page_table(Memory *memory) {
         if (page_table[i].valid == 1 && page_number == page_table[i].page_number) { // finds address on table
             found = 1;
             memory->frame_number = page_table[i].frame_number;
+            physical_memory[memory->frame_number].time = get_current_time();
             break;
         }
     }
@@ -334,11 +341,36 @@ void fifo_tlb(Memory *memory) {
 }
 
 void lru_physical_memory(Memory *memory) {
+    int index = 0;
+    int least_page = physical_memory[0].time;
 
+    for (int i = 0; i < NUMBER_OF_FRAMES; i++) {
+        if (physical_memory[i].time < least_page) {
+            least_page = physical_memory[i].time;
+            index = i;
+        }
+    }
+
+    physical_memory[index].time = get_current_time();
+    physical_memory[index].page_number = memory->page_number; 
+    physical_memory[index].free = 0;
+    memory->frame_number = index;
 }
 
 void lru_page_table(Memory *memory) {
+    int index = 0;
+    int least_page = physical_memory[0].time;
 
+    for (int i = 0; i < NUMBER_OF_FRAMES; i++) {
+        if (physical_memory[i].time < least_page) {
+            least_page = physical_memory[i].time;
+            index = i;
+        }
+    }
+
+    page_table[index].page_number = memory->page_number; 
+    page_table[index].frame_number = memory->frame_number;
+    page_table[index].valid = 1;
 }
 
 void handle_page_fault(Memory *memory) { // update physical memory and page table
@@ -363,8 +395,8 @@ void handle_page_fault(Memory *memory) { // update physical memory and page tabl
             fifo_page_table(memory);
         }
         else if (algorithm == 'L') {
-            //lru_physical_memory(memory);
-           //lru_page_table(memory);
+            lru_physical_memory(memory);
+            lru_page_table(memory);
         }
     }
     handle_tlb(memory);
@@ -408,4 +440,15 @@ int find_free_tlb() {
         }
     }
     return -1;
+}
+
+int get_current_time() {
+    int current = 0;
+    for (int i = 0; i < NUMBER_OF_FRAMES; i++) {
+        if (physical_memory[i].time > current) {
+            current = physical_memory[i].time;
+        }
+    }
+
+    return current + 1;
 }
