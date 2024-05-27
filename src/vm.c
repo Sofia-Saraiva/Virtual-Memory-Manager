@@ -94,7 +94,6 @@ int main(int argc, char *argv[]) {
     FILE *output = fopen("correct.txt", "w");
     for (int i = 0; i < addresses; i++) {
         int physical = memory[i].page_offset + (memory[i].frame_number * FRAME_SIZE);
-        printf("FRAME NUMBER %d\n", memory[i].frame_number);
         fprintf(output, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", memory[i].address, memory[i].tlb_index, physical, memory[i].value);
     }
     fprintf(output, "Number of Translated Addresses = %d\n", addresses);
@@ -358,19 +357,10 @@ void lru_physical_memory(Memory *memory) {
 }
 
 void lru_page_table(Memory *memory) {
-    int index = 0;
-    int least_page = physical_memory[0].time;
-
-    for (int i = 0; i < NUMBER_OF_FRAMES; i++) {
-        if (physical_memory[i].time < least_page) {
-            least_page = physical_memory[i].time;
-            index = i;
-        }
-    }
-
-    page_table[index].page_number = memory->page_number; 
-    page_table[index].frame_number = memory->frame_number;
-    page_table[index].valid = 1;
+    page_table[memory->frame_number].page_number = memory->page_number; 
+    page_table[memory->frame_number].frame_number = memory->frame_number;
+    page_table[memory->frame_number].valid = 1;
+    page_table[memory->frame_number].time = get_current_time();
 }
 
 void handle_page_fault(Memory *memory) { // update physical memory and page table
@@ -380,6 +370,7 @@ void handle_page_fault(Memory *memory) { // update physical memory and page tabl
     if (index != -1) {
         physical_memory[index].page_number = memory->page_number;
         physical_memory[index].free = 0;
+        physical_memory[index].time = get_current_time();
         memory->frame_number = index;
 
         int index_page = find_free_page();
@@ -387,6 +378,7 @@ void handle_page_fault(Memory *memory) { // update physical memory and page tabl
             page_table[index_page].valid = 1;
             page_table[index_page].page_number = memory->page_number;
             page_table[index_page].frame_number = memory->frame_number;
+            page_table[index_page].time = get_current_time();
         }
     } 
     else { // if not free, use fifo or lru
