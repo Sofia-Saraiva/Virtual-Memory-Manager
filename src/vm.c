@@ -3,7 +3,6 @@
 #include <string.h>
 
 #define TLB_SIZE 16
-#define MEMORY_SIZE 128 * 256
 #define PAGE_SIZE 256
 #define FRAME_SIZE 256
 #define NUMBER_OF_FRAMES 128
@@ -66,6 +65,7 @@ int hit = 0;
 int fault = 0;
 int tlb_fifo_index = 0; 
 int physical_index = 0;
+int page_fifo_index = 0;
 char algorithm;
 
 int main(int argc, char *argv[]) {
@@ -328,6 +328,8 @@ void fifo_page_table(Memory *memory) {
     page_table[NUMBER_OF_PAGES - 1].page_number = memory->page_number;
     page_table[NUMBER_OF_PAGES - 1].frame_number = memory->frame_number;
     page_table[NUMBER_OF_PAGES - 1].valid = 1;
+
+    page_fifo_index = (page_fifo_index + 1) % NUMBER_OF_PAGES;
 }
 
 void fifo_tlb(Memory *memory) {
@@ -374,7 +376,7 @@ void handle_page_fault(Memory *memory) { // update physical memory and page tabl
         memory->frame_number = index;
 
         int index_page = find_free_page();
-        if (index != -1) {
+        if (index_page != -1) {
             page_table[index_page].valid = 1;
             page_table[index_page].page_number = memory->page_number;
             page_table[index_page].frame_number = memory->frame_number;
