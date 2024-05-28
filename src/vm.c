@@ -65,7 +65,6 @@ int hit = 0;
 int fault = 0;
 int tlb_fifo_index = 0; 
 int physical_index = 0;
-int page_fifo_index = 0;
 char algorithm;
 
 int main(int argc, char *argv[]) {
@@ -328,8 +327,6 @@ void fifo_page_table(Memory *memory) {
     page_table[NUMBER_OF_PAGES - 1].page_number = memory->page_number;
     page_table[NUMBER_OF_PAGES - 1].frame_number = memory->frame_number;
     page_table[NUMBER_OF_PAGES - 1].valid = 1;
-
-    page_fifo_index = (page_fifo_index + 1) % NUMBER_OF_PAGES;
 }
 
 void fifo_tlb(Memory *memory) {
