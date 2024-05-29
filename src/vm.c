@@ -258,12 +258,15 @@ void init_physical_memory() {
     for (int i = 0; i < NUMBER_OF_FRAMES; i++) { 
         physical_memory[i].free = 1;
         physical_memory[i].time = -1;
+        physical_memory[i].page_number = -1;
     }
 }
 
 void init_page_table() {
     for (int i = 0; i < NUMBER_OF_FRAMES; i++) {
         page_table[i].valid = 0;
+        page_table[i].frame_number = -1; 
+        page_table[i].page_number = -1;
     }
 }
 
@@ -277,7 +280,7 @@ void verify_tlb(Memory *memory) {
     int page_number = memory->page_number;
     int found = 0;
     for (int i = 0; i < TLB_SIZE; i++) { // checks if its in tlb
-        if (page_number == tlb[i].page_number) {
+        if (tlb[i].free == 0 && page_number == tlb[i].page_number) {
             hit++;
             memory->tlb_index = i;
             memory->frame_number = tlb[i].frame_number;
@@ -366,6 +369,7 @@ void handle_page_fault(Memory *memory) { // update physical memory and page tabl
     fault++;
 
     int index = find_free_frame();  // if free, allocate in free frame
+
     if (index != -1) {
         physical_memory[index].page_number = memory->page_number;
         physical_memory[index].free = 0;
