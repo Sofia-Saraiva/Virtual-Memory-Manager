@@ -6,5 +6,5 @@ vm: vm.c
 	@gcc $(CFLAGS) -o vm vm.c
 
 clean:
-	@rm -f vm
+	@rm -f correct.txt vm
 	
